@@ -117,6 +117,9 @@ export function buildProductionWranglerConfig(baseConfig, resources, { attachDom
   const staging = config.env.staging
   const production = {
     name: PRODUCTION.worker,
+    // Preserve dashboard-managed runtime variables (including Stripe price
+    // IDs) when the production config is regenerated for a release.
+    keep_vars: true,
     // Make the isolated canary endpoint explicit. Once the Custom Domain is
     // attached, disable workers.dev so business traffic only uses yuisync.app.
     workers_dev: !attachDomain,
