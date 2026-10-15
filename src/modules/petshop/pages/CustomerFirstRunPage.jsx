@@ -15,6 +15,10 @@ import {
 import { CompanyLogoField } from '../onboarding/CompanyLogoField'
 import { ModuleUnlockPreview } from '../onboarding/ModuleUnlockPreview'
 import { OnboardingStepper } from '../onboarding/OnboardingStepper'
+import {
+  readVisualPreviewFirstRun,
+  writeVisualPreviewFirstRun,
+} from '../onboarding/visualPreviewFirstRun'
 
 const STEPS = ['Empresa', 'Operação', 'Módulos', 'Concluir']
 const WEEKDAYS = [
@@ -58,7 +62,7 @@ function serviceCode(value) {
 export default function CustomerFirstRunPage() {
   const navigate = useNavigate()
   const auth = useAuthCtx()
-  const { activeTenantId, activeTenant, activePlanSlug, activePlanModules, profile, updateStoreSettings, refreshSettings, refreshTenants } = auth
+  const { activeTenantId, activeTenant, activePlanSlug, activePlanModules, profile, updateStoreSettings, refreshSettings, refreshTenants, visualPreview } = auth
   const [wizardStep, setWizardStep] = useState(1)
   const [snapshot, setSnapshot] = useState(null)
   const [progress, setProgress] = useState(null)
@@ -73,6 +77,21 @@ export default function CustomerFirstRunPage() {
     setBusy('load')
     if (!preserveNotice) setNotice(null)
     try {
+      if (visualPreview) {
+        const draft = readVisualPreviewFirstRun({
+          tenantName: activeTenant?.name || 'Ambiente de demonstração',
+          hours: defaultHours(),
+          selectedServices: ['banho-tosa'],
+        })
+        setSnapshot({ tenant: { name: draft.company.business_name }, schedule: { business_hours: {} } })
+        setProgress(draft.progress)
+        setCompany(draft.company)
+        setHours(draft.hours)
+        setSelectedServices(draft.selectedServices)
+        if (!keepStep) setWizardStep(draft.wizardStep)
+        return
+      }
+
       const [nextSnapshot, nextProgress, services, settings] = await Promise.all([
         getAssistedOnboarding(activeTenantId),
         getCustomerFirstRun(activeTenantId),
@@ -97,7 +116,7 @@ export default function CustomerFirstRunPage() {
     } finally {
       setBusy('')
     }
-  }, [activeTenantId])
+  }, [activeTenant?.name, activeTenantId, visualPreview])
 
   useEffect(() => { load() }, [load])
 
@@ -126,6 +145,29 @@ export default function CustomerFirstRunPage() {
 
   async function saveCompany(event) {
     event.preventDefault()
+    if (visualPreview) {
+      const nextProgress = {
+        ...(progress || {}),
+        status: 'in_progress',
+        currentStep: 'horarios',
+        completedSteps: [...new Set([...(progress?.completedSteps || []), 'empresa'])],
+      }
+      const saved = await run('company', async () => {
+        writeVisualPreviewFirstRun({
+          ...readVisualPreviewFirstRun({ hours: defaultHours() }),
+          wizardStep: 2,
+          company,
+          hours,
+          selectedServices,
+          progress: nextProgress,
+        })
+        updateStoreSettings(company)
+        setProgress(nextProgress)
+      }, 'Identidade salva neste navegador.')
+      if (saved) setWizardStep(2)
+      return
+    }
+
     const saved = await run('company', async () => {
       await patchAppSettings({ tenantId: activeTenantId, moduleId: 'petshop', patch: company })
       updateStoreSettings(company)
@@ -149,6 +191,29 @@ export default function CustomerFirstRunPage() {
       setNotice({ type: 'error', text: 'Selecione ao menos um tipo de serviço.' })
       return
     }
+    if (visualPreview) {
+      const nextProgress = {
+        ...(progress || {}),
+        status: 'in_progress',
+        currentStep: 'tour',
+        completedSteps: [...new Set([...(progress?.completedSteps || []), 'empresa', 'horarios', 'servicos'])],
+        canComplete: true,
+      }
+      const saved = await run('operations', async () => {
+        writeVisualPreviewFirstRun({
+          ...readVisualPreviewFirstRun({ hours: defaultHours() }),
+          wizardStep: 3,
+          company,
+          hours,
+          selectedServices,
+          progress: nextProgress,
+        })
+        setProgress(nextProgress)
+      }, 'Operação salva neste navegador.')
+      if (saved) setWizardStep(3)
+      return
+    }
+
     const saved = await run('operations', async () => {
       const businessHours = Object.fromEntries(WEEKDAYS.map(([key]) => [key, hours[key].enabled ? [{ open: hours[key].open, close: hours[key].close }] : []]))
       await saveAssistedSchedule(activeTenantId, {
@@ -177,11 +242,50 @@ export default function CustomerFirstRunPage() {
   }
 
   async function continueFromModules() {
+    if (visualPreview) {
+      const nextProgress = { ...(progress || {}), currentStep: 'tour', canComplete: true }
+      const saved = await run('modules', async () => {
+        writeVisualPreviewFirstRun({
+          ...readVisualPreviewFirstRun({ hours: defaultHours() }),
+          wizardStep: 4,
+          company,
+          hours,
+          selectedServices,
+          progress: nextProgress,
+        })
+        setProgress(nextProgress)
+      }, '')
+      if (saved) setWizardStep(4)
+      return
+    }
+
     const saved = await run('modules', () => patchCustomerFirstRun(activeTenantId, { currentStep: 'tour' }), '')
     if (saved) setWizardStep(4)
   }
 
   async function finish() {
+    if (visualPreview) {
+      const nextProgress = {
+        ...(progress || {}),
+        status: 'completed',
+        currentStep: 'concluido',
+        canComplete: true,
+      }
+      const saved = await run('finish', async () => {
+        writeVisualPreviewFirstRun({
+          ...readVisualPreviewFirstRun({ hours: defaultHours() }),
+          wizardStep: 4,
+          company,
+          hours,
+          selectedServices,
+          progress: nextProgress,
+        })
+        setProgress(nextProgress)
+      }, '')
+      if (saved) navigate('/petshop/dashboard', { replace: true })
+      return
+    }
+
     const saved = await run('finish', async () => {
       await patchCustomerFirstRun(activeTenantId, { completedStep: 'tour', currentStep: 'concluido', complete: true })
       await refreshTenants?.()
@@ -253,7 +357,7 @@ export default function CustomerFirstRunPage() {
         </Card>
       )}
 
-      <p className="text-center text-xs text-muted">Conectado como {profile?.email || 'administrador'} · Progresso salvo na sua empresa</p>
+      <p className="text-center text-xs text-muted">{visualPreview ? 'Demonstração local · Progresso salvo neste navegador' : `Conectado como ${profile?.email || 'administrador'} · Progresso salvo na sua empresa`}</p>
     </div>
   )
 }
