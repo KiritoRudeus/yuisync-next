@@ -64,6 +64,7 @@ export default function CustomerFirstRunPage() {
   const auth = useAuthCtx()
   const { activeTenantId, activeTenant, activePlanSlug, activePlanModules, profile, updateStoreSettings, refreshSettings, refreshTenants, visualPreview } = auth
   const [wizardStep, setWizardStep] = useState(1)
+  const [maxAccessibleStep, setMaxAccessibleStep] = useState(1)
   const [snapshot, setSnapshot] = useState(null)
   const [progress, setProgress] = useState(null)
   const [company, setCompany] = useState({ business_name: '', business_tax_id: '', logo_url: '' })
@@ -88,6 +89,7 @@ export default function CustomerFirstRunPage() {
         setCompany(draft.company)
         setHours(draft.hours)
         setSelectedServices(draft.selectedServices)
+        setMaxAccessibleStep((current) => Math.max(current, draft.wizardStep))
         if (!keepStep) setWizardStep(draft.wizardStep)
         return
       }
@@ -110,7 +112,9 @@ export default function CustomerFirstRunPage() {
       const names = new Set((services || []).map((service) => serviceCode(service.name)))
       const matched = SERVICE_TYPES.filter((service) => names.has(serviceCode(service.label))).map((service) => service.id)
       if (matched.length) setSelectedServices(matched)
-      if (!keepStep) setWizardStep(initialWizardStep(nextProgress))
+      const nextStep = initialWizardStep(nextProgress)
+      setMaxAccessibleStep((current) => Math.max(current, nextStep))
+      if (!keepStep) setWizardStep(nextStep)
     } catch (error) {
       setNotice({ type: 'error', text: error.message || 'Não foi possível carregar a configuração.' })
     } finally {
@@ -164,7 +168,10 @@ export default function CustomerFirstRunPage() {
         updateStoreSettings(company)
         setProgress(nextProgress)
       }, 'Identidade salva neste navegador.')
-      if (saved) setWizardStep(2)
+      if (saved) {
+        setMaxAccessibleStep((current) => Math.max(current, 2))
+        setWizardStep(2)
+      }
       return
     }
 
@@ -175,6 +182,7 @@ export default function CustomerFirstRunPage() {
       await patchCustomerFirstRun(activeTenantId, { completedStep: 'empresa', currentStep: 'horarios' })
     }, 'Identidade salva.')
     if (saved) {
+      setMaxAccessibleStep((current) => Math.max(current, 2))
       setWizardStep(2)
       await load({ keepStep: true, preserveNotice: true })
     }
@@ -210,7 +218,10 @@ export default function CustomerFirstRunPage() {
         })
         setProgress(nextProgress)
       }, 'Operação salva neste navegador.')
-      if (saved) setWizardStep(3)
+      if (saved) {
+        setMaxAccessibleStep((current) => Math.max(current, 3))
+        setWizardStep(3)
+      }
       return
     }
 
@@ -236,6 +247,7 @@ export default function CustomerFirstRunPage() {
       await patchCustomerFirstRun(activeTenantId, { completedStep: 'servicos', currentStep: 'tour' })
     }, 'Operação básica configurada.')
     if (saved) {
+      setMaxAccessibleStep((current) => Math.max(current, 3))
       setWizardStep(3)
       await load({ keepStep: true, preserveNotice: true })
     }
@@ -255,12 +267,18 @@ export default function CustomerFirstRunPage() {
         })
         setProgress(nextProgress)
       }, '')
-      if (saved) setWizardStep(4)
+      if (saved) {
+        setMaxAccessibleStep((current) => Math.max(current, 4))
+        setWizardStep(4)
+      }
       return
     }
 
     const saved = await run('modules', () => patchCustomerFirstRun(activeTenantId, { currentStep: 'tour' }), '')
-    if (saved) setWizardStep(4)
+    if (saved) {
+      setMaxAccessibleStep((current) => Math.max(current, 4))
+      setWizardStep(4)
+    }
   }
 
   async function finish() {
@@ -306,7 +324,7 @@ export default function CustomerFirstRunPage() {
           </div>
           <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[var(--primary-bg-light)] text-[var(--primary)]"><Rocket size={21} /></div>
         </div>
-        <OnboardingStepper currentStep={wizardStep} steps={STEPS} />
+        <OnboardingStepper currentStep={wizardStep} maxAccessibleStep={maxAccessibleStep} onStepChange={setWizardStep} steps={STEPS} />
       </header>
 
       {notice && <div role={notice.type === 'error' ? 'alert' : 'status'} className={`rounded-xl border px-4 py-3 text-sm font-semibold ${notice.type === 'error' ? 'border-[var(--ui-danger-border)] bg-[var(--ui-danger-bg)] text-[var(--ui-danger-fg)]' : 'border-[var(--ui-success-border)] bg-[var(--ui-success-bg)] text-[var(--ui-success-fg)]'}`}>{notice.text}</div>}
